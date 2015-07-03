@@ -83,6 +83,8 @@ RUN cat /usr/src/php/php.ini-recommended | sed 's/^;\(date.timezone.*\)/\1 \"Etc
 	&& sed -i 's/\(extension_dir = \)\"\.\/\"/\1\"\/usr\/local\/lib\/php\/extensions\/no-debug-non-zts-20060613\/\"/' /usr/local/etc/php/php.ini \
 	&& sed -i 's/^short_open_tag.*/short_open_tag = On/' /usr/local/etc/php/php.ini
 
+RUN a2enmod rewrite headers
+
 COPY apache2-foreground /usr/local/bin/
 WORKDIR /var/www/html
 
