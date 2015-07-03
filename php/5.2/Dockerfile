@@ -11,11 +11,23 @@ ENV PHP_INI_DIR /usr/local/etc/php
 
 RUN mkdir -p $PHP_INI_DIR/conf.d
 
-ENV PHP_EXTRA_CONFIGURE_ARGS --enable-fastcgi --enable-fpm --enable-force-cgi-redirect
+ENV PHP_EXTRA_CONFIGURE_ARGS --enable-fastcgi --enable-force-cgi-redirect --with-apxs2
 
 ENV PHP_VERSION 5.2.17
 
 COPY php-5.2.17-*.patch /tmp/
+
+RUN apt-get update && apt-get install -y apache2.2-bin apache2.2-common --no-install-recommends && rm -rf /var/lib/apt/lists/*
+
+RUN rm -rf /var/www/html && mkdir -p /var/lock/apache2 /var/run/apache2 /var/log/apache2 /var/www/html && chown -R www-data:www-data /var/lock/apache2 /var/run/apache2 /var/log/apache2 /var/www/html
+
+# Apache + PHP requires preforking Apache for best results
+RUN a2dismod mpm_event && a2enmod mpm_prefork
+
+RUN mv /etc/apache2/apache2.conf /etc/apache2/apache2.conf.dist && rm /etc/apache2/conf-enabled/* /etc/apache2/sites-enabled/*
+COPY apache2.conf /etc/apache2/apache2.conf
+
+ENV PHP_EXTRA_BUILD_DEPS apache2-dev
 
 RUN buildDeps=" \
 		$PHP_EXTRA_BUILD_DEPS \
@@ -32,15 +44,12 @@ RUN buildDeps=" \
 	set -x \
 	&& apt-get update && apt-get install -y $buildDeps --no-install-recommends && rm -rf /var/lib/apt/lists/* \
 	&& curl -SL "http://museum.php.net/php5/php-$PHP_VERSION.tar.bz2" -o php.tar.bz2 \
-	&& curl -SL "http://php-fpm.org/downloads/php-$PHP_VERSION-fpm-0.5.14.diff.gz" -o php-fpm.diff.gz \
 	&& mkdir -p /usr/src/php \
 	&& tar -xf php.tar.bz2 -C /usr/src/php --strip-components=1 \
-	&& gzip -cd php-fpm.diff.gz > /tmp/php-fpm.diff \
 	&& rm php* \
 	&& cd /usr/src/php \
 	&& patch -p1 < /tmp/php-5.2.17-libxml2.patch \
 	&& patch -p1 < /tmp/php-5.2.17-openssl.patch \
-	&& patch -p1 < /tmp/php-fpm.diff \
 	&& ln -s /usr/lib/x86_64-linux-gnu/libjpeg.a /usr/lib/libjpeg.a \
 	&& ln -s /usr/lib/x86_64-linux-gnu/libjpeg.so /usr/lib/libjpeg.so \
 	&& ln -s /usr/lib/x86_64-linux-gnu/libpng.a /usr/lib/libpng.a \
@@ -50,7 +59,6 @@ RUN buildDeps=" \
 	&& ./configure \
 		--with-config-file-path="$PHP_INI_DIR" \
 		--with-config-file-scan-dir="$PHP_INI_DIR/conf.d" \
-		--with-fpm-conf="$PHP_INI_DIR/php-fpm.conf" \
 		$PHP_EXTRA_CONFIGURE_ARGS \
 		--enable-mbstring \
 		--enable-pdo \
@@ -61,6 +69,7 @@ RUN buildDeps=" \
 		--with-png-dir=/usr \
 		--with-mysql \
 		--with-mysqli \
+        --with-libdir=/lib/x86_64-linux-gnu \
 		--with-openssl \
 		--with-pdo-mysql \
 		--with-readline \
@@ -73,14 +82,13 @@ RUN buildDeps=" \
 	&& make clean
 
 COPY docker-php-ext-* /usr/local/bin/
-COPY php-fpm.conf /usr/local/etc/php/
 
 # Setup timezone to Etc/UTC and fix extension path
 RUN cat /usr/src/php/php.ini-recommended | sed 's/^;\(date.timezone.*\)/\1 \"Etc\/UTC\"/' > /usr/local/etc/php/php.ini \
 	&& sed -i 's/\(extension_dir = \)\"\.\/\"/\1\"\/usr\/local\/lib\/php\/extensions\/no-debug-non-zts-20060613\/\"/' /usr/local/etc/php/php.ini
 
-WORKDIR /var/www
+COPY apache2-foreground /usr/local/bin/
+WORKDIR /var/www/html
 
-# Run php-fpm
-EXPOSE 9000
-CMD ["php-cgi", "--fpm"]
+EXPOSE 80
+CMD ["apache2-foreground"]
